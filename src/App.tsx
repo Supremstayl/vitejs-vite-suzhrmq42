@@ -12,7 +12,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 export default function FahrzeugscheinScanner() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [appPin, setAppPin] = useState(() => {
-    return localStorage.getItem('app_pin') || '1234';
+    return localStorage.getItem('app_pin') || 'gGdHaC';
   });
   const [pinInput, setPinInput] = useState('');
 
