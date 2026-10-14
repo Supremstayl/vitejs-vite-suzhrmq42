@@ -141,6 +141,8 @@ export default function FahrzeugscheinScanner() {
           dokumente: item.data.dokumente || [],
           km_stand: item.data.km_stand || 'Unbekannt',
           tuev_datum: item.data.tuev_datum || '',
+          schadstoffklasse: item.data.schadstoffklasse || 'Nicht lesbar',
+          emissionsnummer: item.data.emissionsnummer || 'Nicht lesbar',
         }));
         setScans(loadedScans);
       }
@@ -447,8 +449,8 @@ export default function FahrzeugscheinScanner() {
         baujahr: aiData.baujahr || 'Unbekannt',
         hsn_tsn: aiData.hsn_tsn || 'Unbekannt',
         vin: aiData.vin || 'Unbekannt',
-        schadstoffklasse: aiData.schadstoffklasse || 'Unbekannt',
-        emissionsnummer: aiData.emissionsnummer || 'Unbekannt',
+        schadstoffklasse: aiData.schadstoffklasse || 'Nicht lesbar',
+        emissionsnummer: aiData.emissionsnummer || 'Nicht lesbar',
         hubraum: aiData.hubraum || 'Unbekannt',
         kw: aiData.kw || 'Unbekannt',
         motorcode: 'Nicht eingetragen',
@@ -564,6 +566,8 @@ export default function FahrzeugscheinScanner() {
       motorcode: scan.motorcode || 'Nicht eingetragen',
       km_stand: scan.km_stand || '',
       tuev_datum: scan.tuev_datum || '',
+      schadstoffklasse: scan.schadstoffklasse || '',
+      emissionsnummer: scan.emissionsnummer || '',
     });
     setIsEditing(true);
   };
@@ -597,7 +601,7 @@ export default function FahrzeugscheinScanner() {
     const updatedHistorie = [newEntry, ...(selectedVehicle.historie || [])];
     const updatedVehicle = {
       ...selectedVehicle,
-      km_stand: historyForm.km_stand, // Aktuellen KM-Stand direkt im Fahrzeug aktualisieren
+      km_stand: historyForm.km_stand,
       historie: updatedHistorie,
     };
 
@@ -741,11 +745,13 @@ export default function FahrzeugscheinScanner() {
               <p><b>Fahrzeug:</b> ${selectedVehicle.hersteller} ${selectedVehicle.modell}</p>
               <p><b>Motorcode:</b> ${selectedVehicle.motorcode || 'Nicht eingetragen'}</p>
               <p><b>Kilometerstand:</b> ${selectedVehicle.km_stand} km</p>
+              <p><b>Schadstoffklasse:</b> ${selectedVehicle.schadstoffklasse}</p>
             </div>
             <div class="card">
               <p><b>Leistung / Hubraum:</b> ${selectedVehicle.kw} / ${selectedVehicle.hubraum}</p>
               <p><b>HSN / TSN:</b> ${selectedVehicle.hsn_tsn}</p>
               <p><b>FIN (VIN):</b> ${selectedVehicle.vin}</p>
+              <p><b>Emissionsnummer:</b> ${selectedVehicle.emissionsnummer}</p>
               <p><b>Nächste HU/TÜV:</b> ${selectedVehicle.tuev_datum || 'Nicht hinterlegt'}</p>
             </div>
           </div>
@@ -837,7 +843,6 @@ export default function FahrzeugscheinScanner() {
     );
   }
 
-  // Erweiterte Suche über Kennzeichen, Name, Hersteller, VIN, Motorcode UND Historie/Teilenummern
   const filteredScans = scans.filter((scan) => {
     const term = searchTerm.toLowerCase();
     const matchBase =
@@ -1029,6 +1034,31 @@ export default function FahrzeugscheinScanner() {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-400">Schadstoffklasse:</label>
+                      <input
+                        type="text"
+                        value={editForm.schadstoffklasse || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, schadstoffklasse: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400">Emissionsnummer:</label>
+                      <input
+                        type="text"
+                        value={editForm.emissionsnummer || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, emissionsnummer: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-xs text-gray-400">Nächste HU / TÜV (Datum):</label>
                     <input
@@ -1044,13 +1074,13 @@ export default function FahrzeugscheinScanner() {
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={handleSaveEdit}
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold text-xs shadow transition-all"
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold shadow transition-all"
                     >
                       💾 Speichern
                     </button>
                     <button
                       onClick={() => setIsEditing(false)}
-                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold text-xs shadow transition-all"
+                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold shadow transition-all"
                     >
                       Abbrechen
                     </button>
@@ -1109,6 +1139,16 @@ export default function FahrzeugscheinScanner() {
                       <span className="text-gray-400">Hubraum:</span>
                       <br />
                       <b className="text-gray-100">{selectedVehicle.hubraum}</b>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Schadstoffklasse:</span>
+                      <br />
+                      <b className="text-gray-100">{selectedVehicle.schadstoffklasse}</b>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Emissionsnummer:</span>
+                      <br />
+                      <b className="text-gray-100">{selectedVehicle.emissionsnummer}</b>
                     </div>
                     <div>
                       <span className="text-gray-400">HSN/TSN:</span>
@@ -1490,6 +1530,33 @@ export default function FahrzeugscheinScanner() {
                         setManualForm({ ...manualForm, hubraum: e.target.value })
                       }
                       placeholder="z.B. 1997"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-gray-400">Schadstoffklasse:</label>
+                    <input
+                      type="text"
+                      value={manualForm.schadstoffklasse}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, schadstoffklasse: e.target.value })
+                      }
+                      placeholder="z.B. Euro 6"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400">Emissionsnummer:</label>
+                    <input
+                      type="text"
+                      value={manualForm.emissionsnummer}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, emissionsnummer: e.target.value })
+                      }
+                      placeholder="z.B. 36AG"
                       className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
