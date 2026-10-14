@@ -6,6 +6,18 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://vftpkzventrmm
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_JoQD_pjVmON8QDWm1tX5iA_47vtX0Qg';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Hilfsfunktion für MM.YYYY Formatierung
+const formatMonthYear = (dateStr) => {
+  if (!dateStr) return '';
+  if (dateStr.includes('-')) {
+    const parts = dateStr.split('-');
+    if (parts.length >= 2) {
+      return `${parts[1]}.${parts[0]}`; // MM.YYYY
+    }
+  }
+  return dateStr;
+};
+
 export default function FahrzeugscheinScanner() {
   const [session, setSession] = useState(null);
   const [authEmail, setAuthEmail] = useState('');
@@ -43,6 +55,7 @@ export default function FahrzeugscheinScanner() {
     hersteller: '',
     modell: '',
     motorcode: '',
+    antrieb: '',
     kw: '',
     hubraum: '',
     hsn_tsn: '',
@@ -51,7 +64,7 @@ export default function FahrzeugscheinScanner() {
     schadstoffklasse: '',
     emissionsnummer: '',
     km_stand: '',
-    tuev_datum: '',
+    tuev_datum: '', // Format YYYY-MM
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -143,8 +156,10 @@ export default function FahrzeugscheinScanner() {
           tuev_datum: item.data.tuev_datum || '',
           schadstoffklasse: item.data.schadstoffklasse || 'Nicht lesbar',
           emissionsnummer: item.data.emissionsnummer || 'Nicht lesbar',
+          antrieb: item.data.antrieb || 'Unbekannt',
         }));
-        setScans(loadedScans);
+        // Scans nach Datum sortieren (neueste zuerst)
+        setScans(loadedScans.sort((a, b) => b.id - a.id));
       }
     } catch (err) {
       console.warn('Cloud-Laden fehlgeschlagen:', err.message);
@@ -337,6 +352,7 @@ export default function FahrzeugscheinScanner() {
       hubraum: manualForm.hubraum || 'Nicht lesbar',
       kw: manualForm.kw || 'Nicht lesbar',
       motorcode: manualForm.motorcode || 'Nicht eingetragen',
+      antrieb: manualForm.antrieb || 'Unbekannt',
       km_stand: manualForm.km_stand,
       tuev_datum: manualForm.tuev_datum || '',
       bilder: [],
@@ -369,6 +385,7 @@ export default function FahrzeugscheinScanner() {
         hersteller: '',
         modell: '',
         motorcode: '',
+        antrieb: '',
         kw: '',
         hubraum: '',
         hsn_tsn: '',
@@ -402,6 +419,7 @@ export default function FahrzeugscheinScanner() {
     - emissionsnummer (Feld 14.1 oder die letzten 2 Ziffern von Feld 1)
     - hubraum (Feld P.1 oder Feld 8, Wert in ccm)
     - kw (Feld P.2 oder Feld 7, exakter Wert in kW, ohne PS, z.B. 129 kW)
+    - antrieb (Kraftstoffart oder Energiequelle, Feld P.3, z.B. Benzin, Diesel, Elektro)
     Falls ein Wert nicht auf dem Bild erkennbar ist, schreibe "Nicht lesbar".`;
 
     try {
@@ -453,6 +471,7 @@ export default function FahrzeugscheinScanner() {
         emissionsnummer: aiData.emissionsnummer || 'Nicht lesbar',
         hubraum: aiData.hubraum || 'Unbekannt',
         kw: aiData.kw || 'Unbekannt',
+        antrieb: aiData.antrieb || 'Unbekannt',
         motorcode: 'Nicht eingetragen',
         tuev_datum: '',
         bilder: [imageBase64],
@@ -564,6 +583,7 @@ export default function FahrzeugscheinScanner() {
     setEditForm({
       ...scan,
       motorcode: scan.motorcode || 'Nicht eingetragen',
+      antrieb: scan.antrieb || '',
       km_stand: scan.km_stand || '',
       tuev_datum: scan.tuev_datum || '',
       schadstoffklasse: scan.schadstoffklasse || '',
@@ -745,6 +765,7 @@ export default function FahrzeugscheinScanner() {
               <p><b>Fahrzeug:</b> ${selectedVehicle.hersteller} ${selectedVehicle.modell}</p>
               <p><b>Motorcode:</b> ${selectedVehicle.motorcode || 'Nicht eingetragen'}</p>
               <p><b>Kilometerstand:</b> ${selectedVehicle.km_stand} km</p>
+              <p><b>Antrieb:</b> ${selectedVehicle.antrieb}</p>
               <p><b>Schadstoffklasse:</b> ${selectedVehicle.schadstoffklasse}</p>
             </div>
             <div class="card">
@@ -752,7 +773,7 @@ export default function FahrzeugscheinScanner() {
               <p><b>HSN / TSN:</b> ${selectedVehicle.hsn_tsn}</p>
               <p><b>FIN (VIN):</b> ${selectedVehicle.vin}</p>
               <p><b>Emissionsnummer:</b> ${selectedVehicle.emissionsnummer}</p>
-              <p><b>Nächste HU/TÜV:</b> ${selectedVehicle.tuev_datum || 'Nicht hinterlegt'}</p>
+              <p><b>Nächste HU/TÜV:</b> ${formatMonthYear(selectedVehicle.tuev_datum) || 'Nicht hinterlegt'}</p>
             </div>
           </div>
 
@@ -778,20 +799,28 @@ export default function FahrzeugscheinScanner() {
     printWindow.document.close();
   };
 
-  // TÜV-Countdown Berechnung
+  // TÜV-Countdown Berechnung (Monatsbasis)
   const getTuevStatus = (tuevStr) => {
-    if (!tuevStr) return { text: 'TÜV nicht hinterlegt', color: 'bg-gray-800 text-gray-400 border-gray-700' };
-    const tuevDate = new Date(tuevStr);
+    if (!tuevStr) return { text: 'HU/TÜV nicht hinterlegt', color: 'bg-gray-800 text-gray-400 border-gray-700' };
+    
     const today = new Date();
-    const diffTime = tuevDate - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
 
-    if (diffDays < 0) {
-      return { text: `TÜV überfällig seit ${Math.abs(diffDays)} Tagen!`, color: 'bg-red-950/80 text-red-300 border-red-700 animate-pulse' };
-    } else if (diffDays <= 30) {
-      return { text: `TÜV fällig in ${diffDays} Tagen!`, color: 'bg-amber-950/80 text-amber-300 border-amber-700' };
+    const parts = tuevStr.split('-');
+    if (parts.length < 2) return { text: `HU gültig bis ${tuevStr}`, color: 'bg-green-950/60 text-green-300 border-green-800' };
+
+    const tuevYear = parseInt(parts[0], 10);
+    const tuevMonth = parseInt(parts[1], 10);
+
+    const diffMonths = (tuevYear - currentYear) * 12 + (tuevMonth - currentMonth);
+
+    if (diffMonths < 0) {
+      return { text: `HU überfällig seit ${Math.abs(diffMonths)} Monat(en)!`, color: 'bg-red-950/80 text-red-300 border-red-700 animate-pulse' };
+    } else if (diffMonths === 0 || diffMonths === 1) {
+      return { text: `HU fällig in diesem/nächsten Monat!`, color: 'bg-amber-950/80 text-amber-300 border-amber-700' };
     } else {
-      return { text: `TÜV gültig bis ${tuevStr}`, color: 'bg-green-950/60 text-green-300 border-green-800' };
+      return { text: `HU gültig bis ${formatMonthYear(tuevStr)}`, color: 'bg-green-950/60 text-green-300 border-green-800' };
     }
   };
 
@@ -1034,6 +1063,69 @@ export default function FahrzeugscheinScanner() {
                     </div>
                   </div>
 
+                  {/* VIN volle Breite */}
+                  <div>
+                    <label className="text-xs text-gray-400">Fahrgestellnummer (VIN):</label>
+                    <input
+                      type="text"
+                      value={editForm.vin || ''}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, vin: e.target.value })
+                      }
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-400">HSN/TSN:</label>
+                      <input
+                        type="text"
+                        value={editForm.hsn_tsn || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, hsn_tsn: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400">Baujahr / EZ:</label>
+                      <input
+                        type="text"
+                        value={editForm.baujahr || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, baujahr: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-400">Leistung (kW):</label>
+                      <input
+                        type="text"
+                        value={editForm.kw || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, kw: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400">Hubraum (ccm):</label>
+                      <input
+                        type="text"
+                        value={editForm.hubraum || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, hubraum: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-xs text-gray-400">Schadstoffklasse:</label>
@@ -1060,15 +1152,32 @@ export default function FahrzeugscheinScanner() {
                   </div>
 
                   <div>
-                    <label className="text-xs text-gray-400">Nächste HU / TÜV (Datum):</label>
+                    <label className="text-xs text-gray-400">Nächste HU / TÜV (Monat/Jahr):</label>
                     <input
-                      type="date"
+                      type="month"
                       value={editForm.tuev_datum || ''}
                       onChange={(e) =>
                         setEditForm({ ...editForm, tuev_datum: e.target.value })
                       }
                       className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-400">Antrieb (z.B. Benzin):</label>
+                      <input
+                        type="text"
+                        value={editForm.antrieb || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, antrieb: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      {/* Freies Feld für zukünftige Erweiterungen */}
+                    </div>
                   </div>
 
                   <div className="flex gap-3 pt-2">
@@ -1104,10 +1213,11 @@ export default function FahrzeugscheinScanner() {
                   {/* TÜV Status Banner */}
                   <div className={`p-2.5 rounded-lg border text-xs font-semibold mb-4 flex items-center justify-between ${getTuevStatus(selectedVehicle.tuev_datum).color}`}>
                     <span>🛡️ {getTuevStatus(selectedVehicle.tuev_datum).text}</span>
-                    <span className="font-mono">{selectedVehicle.tuev_datum ? `(${selectedVehicle.tuev_datum})` : ''}</span>
+                    <span className="font-mono">{selectedVehicle.tuev_datum ? `(${formatMonthYear(selectedVehicle.tuev_datum)})` : ''}</span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 mb-6 text-xs">
+                    {/* Zeile 1 */}
                     <div>
                       <span className="text-gray-400">Kunde:</span>
                       <br />
@@ -1120,6 +1230,8 @@ export default function FahrzeugscheinScanner() {
                         {selectedVehicle.hersteller} {selectedVehicle.modell}
                       </b>
                     </div>
+
+                    {/* Zeile 2 */}
                     <div className="bg-gray-900/60 p-2 rounded-lg border border-gray-700">
                       <span className="text-gray-400 text-[10px] uppercase">Motorcode:</span>
                       <br />
@@ -1130,40 +1242,58 @@ export default function FahrzeugscheinScanner() {
                       <br />
                       <b className="text-emerald-400 text-sm">{selectedVehicle.km_stand} km</b>
                     </div>
-                    <div>
-                      <span className="text-gray-400">Leistung:</span>
+
+                    {/* Zeile 3: VIN über volle Breite */}
+                    <div className="col-span-2">
+                      <span className="text-gray-400">Fahrgestellnummer (VIN):</span>
                       <br />
-                      <b className="text-gray-100">{selectedVehicle.kw}</b>
+                      <b className="text-gray-100 text-sm">{selectedVehicle.vin}</b>
                     </div>
-                    <div>
-                      <span className="text-gray-400">Hubraum:</span>
-                      <br />
-                      <b className="text-gray-100">{selectedVehicle.hubraum}</b>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Schadstoffklasse:</span>
-                      <br />
-                      <b className="text-gray-100">{selectedVehicle.schadstoffklasse}</b>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Emissionsnummer:</span>
-                      <br />
-                      <b className="text-gray-100">{selectedVehicle.emissionsnummer}</b>
-                    </div>
+
+                    {/* Zeile 4 */}
                     <div>
                       <span className="text-gray-400">HSN/TSN:</span>
                       <br />
-                      <b className="text-gray-100">{selectedVehicle.hsn_tsn}</b>
+                      <b className="text-gray-100 text-sm">{selectedVehicle.hsn_tsn}</b>
                     </div>
                     <div>
                       <span className="text-gray-400">Baujahr / EZ:</span>
                       <br />
-                      <b className="text-gray-100">{selectedVehicle.baujahr}</b>
+                      <b className="text-gray-100 text-sm">{selectedVehicle.baujahr}</b>
                     </div>
-                    <div className="col-span-2">
-                      <span className="text-gray-400">Fahrgestellnummer (VIN):</span>
+
+                    {/* Zeile 5 */}
+                    <div>
+                      <span className="text-gray-400">Leistung:</span>
                       <br />
-                      <b className="text-gray-100 font-mono text-[11px]">{selectedVehicle.vin}</b>
+                      <b className="text-gray-100 text-sm">{selectedVehicle.kw}</b>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Hubraum:</span>
+                      <br />
+                      <b className="text-gray-100 text-sm">{selectedVehicle.hubraum}</b>
+                    </div>
+
+                    {/* Zeile 6 */}
+                    <div>
+                      <span className="text-gray-400">Schadstoffklasse:</span>
+                      <br />
+                      <b className="text-gray-100 text-sm">{selectedVehicle.schadstoffklasse}</b>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Emissionsnummer:</span>
+                      <br />
+                      <b className="text-gray-100 text-sm">{selectedVehicle.emissionsnummer}</b>
+                    </div>
+
+                    {/* Zeile 7: Antrieb unten links, rechts frei */}
+                    <div>
+                      <span className="text-gray-400">Antrieb:</span>
+                      <br />
+                      <b className="text-gray-100 text-sm">{selectedVehicle.antrieb}</b>
+                    </div>
+                    <div>
+                      {/* Freies Feld für zukünftige Erweiterungen */}
                     </div>
                   </div>
 
@@ -1314,9 +1444,16 @@ export default function FahrzeugscheinScanner() {
                         <span className="font-bold text-base text-white">
                           {scan.kennzeichen}
                         </span>
-                        <span className="text-[11px] bg-emerald-950/60 text-emerald-400 px-2 py-0.5 rounded font-mono border border-emerald-800">
-                          {scan.km_stand} km
-                        </span>
+                        <div className="flex gap-1.5 items-center">
+                          <span className="text-[11px] bg-emerald-950/60 text-emerald-400 px-2 py-0.5 rounded font-mono border border-emerald-800">
+                            {scan.km_stand} km
+                          </span>
+                          {scan.tuev_datum && (
+                            <span className="text-[11px] bg-amber-950/60 text-amber-400 px-2 py-0.5 rounded font-mono border border-amber-800">
+                              HU: {formatMonthYear(scan.tuev_datum)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2">
                         <span className="text-gray-300">
@@ -1443,9 +1580,9 @@ export default function FahrzeugscheinScanner() {
                     />
                   </div>
                   <div>
-                    <label className="text-gray-400">Nächste HU / TÜV:</label>
+                    <label className="text-gray-400">Nächste HU / TÜV (Monat/Jahr):</label>
                     <input
-                      type="date"
+                      type="month"
                       value={manualForm.tuev_datum}
                       onChange={(e) =>
                         setManualForm({ ...manualForm, tuev_datum: e.target.value })
@@ -1495,20 +1632,19 @@ export default function FahrzeugscheinScanner() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-gray-400">Motorcode:</label>
-                  <input
-                    type="text"
-                    value={manualForm.motorcode}
-                    onChange={(e) =>
-                      setManualForm({ ...manualForm, motorcode: e.target.value })
-                    }
-                    placeholder="z.B. N20B20"
-                    className="w-full p-2 bg-gray-900 border border-blue-500 rounded-lg text-white font-semibold"
-                  />
-                </div>
-
                 <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-gray-400">Motorcode:</label>
+                    <input
+                      type="text"
+                      value={manualForm.motorcode}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, motorcode: e.target.value })
+                      }
+                      placeholder="z.B. N20B20"
+                      className="w-full p-2 bg-gray-900 border border-blue-500 rounded-lg text-white font-semibold"
+                    />
+                  </div>
                   <div>
                     <label className="text-gray-400">Leistung (kW):</label>
                     <input
@@ -1521,45 +1657,20 @@ export default function FahrzeugscheinScanner() {
                       className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
-                  <div>
-                    <label className="text-gray-400">Hubraum (ccm):</label>
-                    <input
-                      type="text"
-                      value={manualForm.hubraum}
-                      onChange={(e) =>
-                        setManualForm({ ...manualForm, hubraum: e.target.value })
-                      }
-                      placeholder="z.B. 1997"
-                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
-                    />
-                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-gray-400">Schadstoffklasse:</label>
-                    <input
-                      type="text"
-                      value={manualForm.schadstoffklasse}
-                      onChange={(e) =>
-                        setManualForm({ ...manualForm, schadstoffklasse: e.target.value })
-                      }
-                      placeholder="z.B. Euro 6"
-                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-400">Emissionsnummer:</label>
-                    <input
-                      type="text"
-                      value={manualForm.emissionsnummer}
-                      onChange={(e) =>
-                        setManualForm({ ...manualForm, emissionsnummer: e.target.value })
-                      }
-                      placeholder="z.B. 36AG"
-                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
-                    />
-                  </div>
+                {/* VIN volle Breite */}
+                <div>
+                  <label className="text-gray-400">Fahrgestellnummer (VIN):</label>
+                  <input
+                    type="text"
+                    value={manualForm.vin}
+                    onChange={(e) =>
+                      setManualForm({ ...manualForm, vin: e.target.value })
+                    }
+                    placeholder="z.B. WBA3A57..."
+                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1589,17 +1700,68 @@ export default function FahrzeugscheinScanner() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-gray-400">Fahrgestellnummer (VIN):</label>
-                  <input
-                    type="text"
-                    value={manualForm.vin}
-                    onChange={(e) =>
-                      setManualForm({ ...manualForm, vin: e.target.value })
-                    }
-                    placeholder="z.B. WBA3A57..."
-                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white font-mono"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-gray-400">Hubraum (ccm):</label>
+                    <input
+                      type="text"
+                      value={manualForm.hubraum}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, hubraum: e.target.value })
+                      }
+                      placeholder="z.B. 1997"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400">Schadstoffklasse:</label>
+                    <input
+                      type="text"
+                      value={manualForm.schadstoffklasse}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, schadstoffklasse: e.target.value })
+                      }
+                      placeholder="z.B. Euro 6"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-gray-400">Emissionsnummer:</label>
+                    <input
+                      type="text"
+                      value={manualForm.emissionsnummer}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, emissionsnummer: e.target.value })
+                      }
+                      placeholder="z.B. 36AG"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                  <div>
+                    {/* Leer lassen, wie im Bearbeiten-Formular verschoben */}
+                  </div>
+                </div>
+
+                {/* Antrieb links unten, rechts frei */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-gray-400">Antrieb (z.B. Benzin):</label>
+                    <input
+                      type="text"
+                      value={manualForm.antrieb}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, antrieb: e.target.value })
+                      }
+                      placeholder="z.B. Diesel"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                  <div>
+                    {/* Freies Feld */}
+                  </div>
                 </div>
 
                 <div className="flex gap-2 pt-2">
