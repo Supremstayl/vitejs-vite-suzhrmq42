@@ -25,6 +25,11 @@ export default function FahrzeugscheinScanner() {
   const [isScanning, setIsScanning] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Zwischenspeicher für KM-Stand bei neuen Scans
+  const [pendingScanData, setPendingScanData] = useState(null);
+  const [isKmModalOpen, setIsKmModalOpen] = useState(false);
+  const [tempKmInput, setTempKmInput] = useState('');
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
@@ -45,6 +50,8 @@ export default function FahrzeugscheinScanner() {
     vin: '',
     schadstoffklasse: '',
     emissionsnummer: '',
+    km_stand: '',
+    tuev_datum: '',
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -56,6 +63,7 @@ export default function FahrzeugscheinScanner() {
     datum: new Date().toISOString().split('T')[0],
     beschreibung: '',
     teilenummern: '',
+    km_stand: '',
   });
 
   const [isDocsOpen, setIsDocsOpen] = useState(false);
@@ -77,7 +85,6 @@ export default function FahrzeugscheinScanner() {
   const canvasRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  // Authentifizierungs-Status beim Start prüfen
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -132,6 +139,8 @@ export default function FahrzeugscheinScanner() {
           bilder: item.data.bilder || (item.data.bild ? [item.data.bild] : []),
           historie: item.data.historie || [],
           dokumente: item.data.dokumente || [],
+          km_stand: item.data.km_stand || 'Unbekannt',
+          tuev_datum: item.data.tuev_datum || '',
         }));
         setScans(loadedScans);
       }
@@ -140,7 +149,6 @@ export default function FahrzeugscheinScanner() {
     }
   };
 
-  // Fahrzeug in Supabase speichern
   const saveVehicleToCloud = async (vehicleData) => {
     try {
       if (vehicleData.supabaseId) {
@@ -165,7 +173,6 @@ export default function FahrzeugscheinScanner() {
     }
   };
 
-  // Fahrzeug aus Supabase löschen
   const deleteVehicleFromCloud = async (supabaseId) => {
     if (!supabaseId) return;
     try {
@@ -264,22 +271,42 @@ export default function FahrzeugscheinScanner() {
   };
 
   const processNewVehicleData = async (newScanData) => {
+    setPendingScanData(newScanData);
+    setTempKmInput('');
+    setIsKmModalOpen(true);
+  };
+
+  const handleKmModalSubmit = async (e) => {
+    e.preventDefault();
+    if (!tempKmInput.trim()) {
+      alert('Der Kilometerstand ist zwingend erforderlich!');
+      return;
+    }
+
+    const finalScanData = {
+      ...pendingScanData,
+      km_stand: tempKmInput.trim(),
+    };
+
+    setIsKmModalOpen(false);
+    setPendingScanData(null);
+
     const existing = scans.find(
       (s) =>
-        s.kennzeichen.toLowerCase() === newScanData.kennzeichen.toLowerCase() &&
-        newScanData.kennzeichen !== 'Unbekannt' &&
-        newScanData.kennzeichen !== ''
+        s.kennzeichen.toLowerCase() === finalScanData.kennzeichen.toLowerCase() &&
+        finalScanData.kennzeichen !== 'Unbekannt' &&
+        finalScanData.kennzeichen !== ''
     );
 
     if (existing) {
       setDuplicateModal({
         isOpen: true,
         existingVehicle: existing,
-        newScanData: newScanData,
+        newScanData: finalScanData,
       });
     } else {
-      await saveVehicleToCloud(newScanData);
-      setScans((prevScans) => [newScanData, ...prevScans]);
+      await saveVehicleToCloud(finalScanData);
+      setScans((prevScans) => [finalScanData, ...prevScans]);
     }
   };
 
@@ -287,6 +314,10 @@ export default function FahrzeugscheinScanner() {
     e.preventDefault();
     if (!manualForm.kennzeichen.trim()) {
       alert('Bitte gib mindestens ein Kennzeichen ein.');
+      return;
+    }
+    if (!manualForm.km_stand.trim()) {
+      alert('Der aktuelle Kilometerstand ist zwingend erforderlich!');
       return;
     }
 
@@ -304,28 +335,49 @@ export default function FahrzeugscheinScanner() {
       hubraum: manualForm.hubraum || 'Nicht lesbar',
       kw: manualForm.kw || 'Nicht lesbar',
       motorcode: manualForm.motorcode || 'Nicht eingetragen',
+      km_stand: manualForm.km_stand,
+      tuev_datum: manualForm.tuev_datum || '',
       bilder: [],
       historie: [],
       dokumente: [],
       datum: new Date().toLocaleDateString('de-DE'),
     };
 
-    await processNewVehicleData(newVehicle);
-    setIsManualOpen(false);
-    setManualForm({
-      kennzeichen: '',
-      name: '',
-      hersteller: '',
-      modell: '',
-      motorcode: '',
-      kw: '',
-      hubraum: '',
-      hsn_tsn: '',
-      baujahr: '',
-      vin: '',
-      schadstoffklasse: '',
-      emissionsnummer: '',
-    });
+    const existing = scans.find(
+      (s) =>
+        s.kennzeichen.toLowerCase() === newVehicle.kennzeichen.toLowerCase() &&
+        newVehicle.kennzeichen !== 'Unbekannt' &&
+        newVehicle.kennzeichen !== ''
+    );
+
+    if (existing) {
+      setIsManualOpen(false);
+      setDuplicateModal({
+        isOpen: true,
+        existingVehicle: existing,
+        newScanData: newVehicle,
+      });
+    } else {
+      await saveVehicleToCloud(newVehicle);
+      setScans((prevScans) => [newVehicle, ...prevScans]);
+      setIsManualOpen(false);
+      setManualForm({
+        kennzeichen: '',
+        name: '',
+        hersteller: '',
+        modell: '',
+        motorcode: '',
+        kw: '',
+        hubraum: '',
+        hsn_tsn: '',
+        baujahr: '',
+        vin: '',
+        schadstoffklasse: '',
+        emissionsnummer: '',
+        km_stand: '',
+        tuev_datum: '',
+      });
+    }
   };
 
   const extractDataWithAI = async (imageBase64) => {
@@ -400,6 +452,7 @@ export default function FahrzeugscheinScanner() {
         hubraum: aiData.hubraum || 'Unbekannt',
         kw: aiData.kw || 'Unbekannt',
         motorcode: 'Nicht eingetragen',
+        tuev_datum: '',
         bilder: [imageBase64],
         historie: [],
         dokumente: [],
@@ -414,7 +467,6 @@ export default function FahrzeugscheinScanner() {
     } finally {
       setIsLoading(false);
       setIsScanning(false);
-      setSelectedVehicle(null);
     }
   };
 
@@ -441,6 +493,7 @@ export default function FahrzeugscheinScanner() {
         ...newScanData,
         id: existingVehicle.id,
         supabaseId: existingVehicle.supabaseId,
+        km_stand: newScanData.km_stand || existingVehicle.km_stand,
         bilder:
           newScanData.bilder.length > 0
             ? newScanData.bilder
@@ -509,6 +562,8 @@ export default function FahrzeugscheinScanner() {
     setEditForm({
       ...scan,
       motorcode: scan.motorcode || 'Nicht eingetragen',
+      km_stand: scan.km_stand || '',
+      tuev_datum: scan.tuev_datum || '',
     });
     setIsEditing(true);
   };
@@ -529,6 +584,10 @@ export default function FahrzeugscheinScanner() {
       alert('Bitte gib eine Beschreibung der Arbeiten ein.');
       return;
     }
+    if (!historyForm.km_stand.trim()) {
+      alert('Der Kilometerstand ist für jeden Historien-Eintrag zwingend erforderlich!');
+      return;
+    }
 
     const newEntry = {
       id: Date.now(),
@@ -536,7 +595,11 @@ export default function FahrzeugscheinScanner() {
     };
 
     const updatedHistorie = [newEntry, ...(selectedVehicle.historie || [])];
-    const updatedVehicle = { ...selectedVehicle, historie: updatedHistorie };
+    const updatedVehicle = {
+      ...selectedVehicle,
+      km_stand: historyForm.km_stand, // Aktuellen KM-Stand direkt im Fahrzeug aktualisieren
+      historie: updatedHistorie,
+    };
 
     setSelectedVehicle(updatedVehicle);
     setScans(
@@ -549,6 +612,7 @@ export default function FahrzeugscheinScanner() {
       datum: new Date().toISOString().split('T')[0],
       beschreibung: '',
       teilenummern: '',
+      km_stand: '',
     });
   };
 
@@ -650,7 +714,81 @@ export default function FahrzeugscheinScanner() {
     }
   };
 
-  // Wenn nicht eingeloggt, Login-Bildschirm anzeigen
+  // PDF-Bericht / Druckfunktion
+  const printVehicleReport = () => {
+    if (!selectedVehicle) return;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Fahrzeugbericht - ${selectedVehicle.kennzeichen}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
+            h1 { color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; }
+            h2 { color: #475569; margin-top: 20px; border-bottom: 1px solid #cbd5e1; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+            .card { background: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 5px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f1f5f9; }
+          </style>
+        </head>
+        <body>
+          <h1>Fahrzeugakte: ${selectedVehicle.kennzeichen}</h1>
+          <div class="grid">
+            <div class="card">
+              <p><b>Halter / Kunde:</b> ${selectedVehicle.name}</p>
+              <p><b>Fahrzeug:</b> ${selectedVehicle.hersteller} ${selectedVehicle.modell}</p>
+              <p><b>Motorcode:</b> ${selectedVehicle.motorcode || 'Nicht eingetragen'}</p>
+              <p><b>Kilometerstand:</b> ${selectedVehicle.km_stand} km</p>
+            </div>
+            <div class="card">
+              <p><b>Leistung / Hubraum:</b> ${selectedVehicle.kw} / ${selectedVehicle.hubraum}</p>
+              <p><b>HSN / TSN:</b> ${selectedVehicle.hsn_tsn}</p>
+              <p><b>FIN (VIN):</b> ${selectedVehicle.vin}</p>
+              <p><b>Nächste HU/TÜV:</b> ${selectedVehicle.tuev_datum || 'Nicht hinterlegt'}</p>
+            </div>
+          </div>
+
+          <h2>Werkstatt-Historie (${selectedVehicle.historie?.length || 0} Einträge)</h2>
+          <table>
+            <tr><th>Datum</th><th>Kategorie</th><th>KM-Stand</th><th>Beschreibung & Teile</th></tr>
+            ${selectedVehicle.historie && selectedVehicle.historie.length > 0 ? selectedVehicle.historie.map(h => `
+              <tr>
+                <td>${h.datum}</td>
+                <td><b>${h.kategorie}</b></td>
+                <td>${h.km_stand} km</td>
+                <td>${h.beschreibung} ${h.teilenummern ? `<br><i>Teile: ${h.teilenummern}</i>` : ''}</td>
+              </tr>
+            `).join('') : '<tr><td colspan="4">Keine Historien-Einträge vorhanden.</td></tr>'}
+          </table>
+
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  // TÜV-Countdown Berechnung
+  const getTuevStatus = (tuevStr) => {
+    if (!tuevStr) return { text: 'TÜV nicht hinterlegt', color: 'bg-gray-800 text-gray-400 border-gray-700' };
+    const tuevDate = new Date(tuevStr);
+    const today = new Date();
+    const diffTime = tuevDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      return { text: `TÜV überfällig seit ${Math.abs(diffDays)} Tagen!`, color: 'bg-red-950/80 text-red-300 border-red-700 animate-pulse' };
+    } else if (diffDays <= 30) {
+      return { text: `TÜV fällig in ${diffDays} Tagen!`, color: 'bg-amber-950/80 text-amber-300 border-amber-700' };
+    } else {
+      return { text: `TÜV gültig bis ${tuevStr}`, color: 'bg-green-950/60 text-green-300 border-green-800' };
+    }
+  };
+
   if (!session) {
     return (
       <div className="fixed inset-0 overflow-hidden bg-gray-900 text-gray-100 font-sans w-full h-full flex justify-center items-center p-4">
@@ -699,15 +837,26 @@ export default function FahrzeugscheinScanner() {
     );
   }
 
-  const filteredScans = scans.filter(
-    (scan) =>
-      scan.kennzeichen.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      scan.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      scan.hersteller.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      scan.vin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (scan.motorcode &&
-        scan.motorcode.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Erweiterte Suche über Kennzeichen, Name, Hersteller, VIN, Motorcode UND Historie/Teilenummern
+  const filteredScans = scans.filter((scan) => {
+    const term = searchTerm.toLowerCase();
+    const matchBase =
+      scan.kennzeichen.toLowerCase().includes(term) ||
+      scan.name.toLowerCase().includes(term) ||
+      scan.hersteller.toLowerCase().includes(term) ||
+      scan.vin.toLowerCase().includes(term) ||
+      (scan.motorcode && scan.motorcode.toLowerCase().includes(term));
+
+    const matchHistory =
+      scan.historie &&
+      scan.historie.some(
+        (h) =>
+          h.beschreibung.toLowerCase().includes(term) ||
+          (h.teilenummern && h.teilenummern.toLowerCase().includes(term))
+      );
+
+    return matchBase || matchHistory;
+  });
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-gray-900 text-gray-100 font-sans w-full h-full flex justify-center">
@@ -717,7 +866,7 @@ export default function FahrzeugscheinScanner() {
             <h1 className="text-xl font-bold tracking-wide text-white">
               KFZ-Schein Scanner
             </h1>
-            <span className="text-[10px] text-gray-400 block">Eingeloggt als: {session.user.email}</span>
+            <span className="text-[10px] text-gray-400 block">Eingeloggt: {session.user.email}</span>
           </div>
           <div className="flex gap-2">
             <button
@@ -767,26 +916,33 @@ export default function FahrzeugscheinScanner() {
                     setSelectedVehicle(null);
                     setIsEditing(false);
                   }}
-                  className="text-blue-400 hover:text-blue-300 transition-colors font-bold flex items-center"
+                  className="text-blue-400 hover:text-blue-300 transition-colors font-bold flex items-center text-xs"
                 >
                   ← Zurück zur Übersicht
                 </button>
 
                 {!isEditing && (
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={printVehicleReport}
+                      className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] px-2 py-1.5 rounded-lg font-bold transition-all shadow flex items-center gap-1"
+                      title="PDF-Bericht drucken"
+                    >
+                      🖨️ PDF
+                    </button>
                     <button
                       onClick={() => setIsHistoryOpen(true)}
-                      className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-2.5 py-1.5 rounded-lg font-bold transition-all shadow flex items-center gap-1"
-                      title="Werkstatt-Historie öffnen"
+                      className="bg-purple-600 hover:bg-purple-700 text-white text-[11px] px-2 py-1.5 rounded-lg font-bold transition-all shadow flex items-center gap-1"
+                      title="Werkstatt-Historie"
                     >
-                      📋 Historie ({selectedVehicle.historie?.length || 0})
+                      📋 ({selectedVehicle.historie?.length || 0})
                     </button>
                     <button
                       onClick={() => setIsDocsOpen(true)}
-                      className="bg-teal-600 hover:bg-teal-700 text-white text-xs px-2.5 py-1.5 rounded-lg font-bold transition-all shadow flex items-center gap-1"
-                      title="Dokumente & Dateien öffnen"
+                      className="bg-teal-600 hover:bg-teal-700 text-white text-[11px] px-2 py-1.5 rounded-lg font-bold transition-all shadow flex items-center gap-1"
+                      title="Dokumente"
                     >
-                      📎 Docs ({selectedVehicle.dokumente?.length || 0})
+                      📎 ({selectedVehicle.dokumente?.length || 0})
                     </button>
                   </div>
                 )}
@@ -799,51 +955,39 @@ export default function FahrzeugscheinScanner() {
                   </h2>
 
                   <div>
-                    <label className="text-xs text-gray-400">
-                      Kennzeichen:
-                    </label>
+                    <label className="text-xs text-gray-400">Kennzeichen:</label>
                     <input
                       type="text"
                       value={editForm.kennzeichen || ''}
                       onChange={(e) =>
-                        setEditForm({
-                          ...editForm,
-                          kennzeichen: e.target.value,
-                        })
+                        setEditForm({ ...editForm, kennzeichen: e.target.value })
                       }
-                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs text-gray-400">
-                      Kunde / Halter:
-                    </label>
+                    <label className="text-xs text-gray-400">Kunde / Halter:</label>
                     <input
                       type="text"
                       value={editForm.name || ''}
                       onChange={(e) =>
                         setEditForm({ ...editForm, name: e.target.value })
                       }
-                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-xs text-gray-400">
-                        Hersteller:
-                      </label>
+                      <label className="text-xs text-gray-400">Hersteller:</label>
                       <input
                         type="text"
                         value={editForm.hersteller || ''}
                         onChange={(e) =>
-                          setEditForm({
-                            ...editForm,
-                            hersteller: e.target.value,
-                          })
+                          setEditForm({ ...editForm, hersteller: e.target.value })
                         }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
                       />
                     </div>
                     <div>
@@ -854,139 +998,59 @@ export default function FahrzeugscheinScanner() {
                         onChange={(e) =>
                           setEditForm({ ...editForm, modell: e.target.value })
                         }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
+                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-400">Motorcode:</label>
+                      <input
+                        type="text"
+                        value={editForm.motorcode || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, motorcode: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-blue-500 rounded text-white text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-red-400 font-bold">KM-Stand *:</label>
+                      <input
+                        type="text"
+                        required
+                        value={editForm.km_stand || ''}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, km_stand: e.target.value })
+                        }
+                        className="w-full p-2 bg-gray-900 border border-red-500 rounded text-white text-xs font-bold"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-xs text-gray-400">Motorcode:</label>
+                    <label className="text-xs text-gray-400">Nächste HU / TÜV (Datum):</label>
                     <input
-                      type="text"
-                      value={editForm.motorcode || ''}
+                      type="date"
+                      value={editForm.tuev_datum || ''}
                       onChange={(e) =>
-                        setEditForm({ ...editForm, motorcode: e.target.value })
+                        setEditForm({ ...editForm, tuev_datum: e.target.value })
                       }
-                      className="w-full p-2 bg-gray-900 border border-blue-500 rounded text-white font-semibold"
-                      placeholder="z.B. N20B20"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white text-xs"
                     />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-gray-400">
-                        Leistung (kW):
-                      </label>
-                      <input
-                        type="text"
-                        value={editForm.kw || ''}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, kw: e.target.value })
-                        }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-400">
-                        Hubraum (ccm):
-                      </label>
-                      <input
-                        type="text"
-                        value={editForm.hubraum || ''}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, hubraum: e.target.value })
-                        }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-gray-400">HSN/TSN:</label>
-                      <input
-                        type="text"
-                        value={editForm.hsn_tsn || ''}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, hsn_tsn: e.target.value })
-                        }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-400">
-                        Baujahr / EZ:
-                      </label>
-                      <input
-                        type="text"
-                        value={editForm.baujahr || ''}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, baujahr: e.target.value })
-                        }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-400">
-                      Fahrgestellnummer (VIN):
-                    </label>
-                    <input
-                      type="text"
-                      value={editForm.vin || ''}
-                      onChange={(e) =>
-                        setEditForm({ ...editForm, vin: e.target.value })
-                      }
-                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-gray-400">
-                        Schadstoffklasse:
-                      </label>
-                      <input
-                        type="text"
-                        value={editForm.schadstoffklasse || ''}
-                        onChange={(e) =>
-                          setEditForm({
-                            ...editForm,
-                            schadstoffklasse: e.target.value,
-                          })
-                        }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-400">
-                        Emissionsnummer:
-                      </label>
-                      <input
-                        type="text"
-                        value={editForm.emissionsnummer || ''}
-                        onChange={(e) =>
-                          setEditForm({
-                            ...editForm,
-                            emissionsnummer: e.target.value,
-                          })
-                        }
-                        className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
-                      />
-                    </div>
                   </div>
 
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={handleSaveEdit}
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold shadow transition-all"
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold text-xs shadow transition-all"
                     >
                       💾 Speichern
                     </button>
                     <button
                       onClick={() => setIsEditing(false)}
-                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold shadow transition-all"
+                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold text-xs shadow transition-all"
                     >
                       Abbrechen
                     </button>
@@ -995,104 +1059,90 @@ export default function FahrzeugscheinScanner() {
               ) : (
                 <>
                   <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-3xl font-bold text-white tracking-wide">
+                    <h2 className="text-2xl font-bold text-white tracking-wide">
                       {selectedVehicle.kennzeichen}
                     </h2>
                     <button
                       onClick={(e) => handleStartEdit(e, selectedVehicle)}
-                      className="p-1 bg-gray-700 hover:bg-blue-600 text-gray-200 hover:text-white rounded-md transition-all shadow border border-gray-600 flex items-center justify-center text-xs"
+                      className="p-1.5 bg-gray-700 hover:bg-blue-600 text-gray-200 hover:text-white rounded-md transition-all shadow border border-gray-600 flex items-center justify-center text-xs"
                       title="Fahrzeugdaten bearbeiten"
                     >
-                      ✏️
+                      ✏️ Bearbeiten
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 mb-6">
+                  {/* TÜV Status Banner */}
+                  <div className={`p-2.5 rounded-lg border text-xs font-semibold mb-4 flex items-center justify-between ${getTuevStatus(selectedVehicle.tuev_datum).color}`}>
+                    <span>🛡️ {getTuevStatus(selectedVehicle.tuev_datum).text}</span>
+                    <span className="font-mono">{selectedVehicle.tuev_datum ? `(${selectedVehicle.tuev_datum})` : ''}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-6 text-xs">
                     <div>
-                      <span className="text-gray-400 text-sm">Kunde:</span>
+                      <span className="text-gray-400">Kunde:</span>
                       <br />
-                      <b className="text-gray-100">{selectedVehicle.name}</b>
+                      <b className="text-gray-100 text-sm">{selectedVehicle.name}</b>
                     </div>
                     <div>
-                      <span className="text-gray-400 text-sm">Fahrzeug:</span>
+                      <span className="text-gray-400">Fahrzeug:</span>
                       <br />
-                      <b className="text-gray-100">
+                      <b className="text-gray-100 text-sm">
                         {selectedVehicle.hersteller} {selectedVehicle.modell}
                       </b>
                     </div>
-                    <div className="col-span-2 bg-gray-900/50 p-2.5 rounded-lg border border-gray-700">
-                      <span className="text-gray-400 text-xs uppercase tracking-wider">
-                        Motorcode:
-                      </span>
+                    <div className="bg-gray-900/60 p-2 rounded-lg border border-gray-700">
+                      <span className="text-gray-400 text-[10px] uppercase">Motorcode:</span>
                       <br />
-                      <b className="text-blue-400 text-lg">
-                        {selectedVehicle.motorcode || 'Nicht eingetragen'}
-                      </b>
+                      <b className="text-blue-400 text-sm">{selectedVehicle.motorcode || 'Keiner'}</b>
+                    </div>
+                    <div className="bg-gray-900/60 p-2 rounded-lg border border-gray-700">
+                      <span className="text-gray-400 text-[10px] uppercase">Kilometerstand:</span>
+                      <br />
+                      <b className="text-emerald-400 text-sm">{selectedVehicle.km_stand} km</b>
                     </div>
                     <div>
-                      <span className="text-gray-400 text-sm">Leistung:</span>
+                      <span className="text-gray-400">Leistung:</span>
                       <br />
                       <b className="text-gray-100">{selectedVehicle.kw}</b>
                     </div>
                     <div>
-                      <span className="text-gray-400 text-sm">Hubraum:</span>
+                      <span className="text-gray-400">Hubraum:</span>
                       <br />
                       <b className="text-gray-100">{selectedVehicle.hubraum}</b>
                     </div>
                     <div>
-                      <span className="text-gray-400 text-sm">HSN/TSN:</span>
+                      <span className="text-gray-400">HSN/TSN:</span>
                       <br />
                       <b className="text-gray-100">{selectedVehicle.hsn_tsn}</b>
                     </div>
                     <div>
-                      <span className="text-gray-400 text-sm">Baujahr:</span>
+                      <span className="text-gray-400">Baujahr / EZ:</span>
                       <br />
                       <b className="text-gray-100">{selectedVehicle.baujahr}</b>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-gray-400 text-sm">
-                        Fahrgestellnummer (VIN):
-                      </span>
+                      <span className="text-gray-400">Fahrgestellnummer (VIN):</span>
                       <br />
-                      <b className="text-gray-100">{selectedVehicle.vin}</b>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 text-sm">
-                        Schadstoffklasse:
-                      </span>
-                      <br />
-                      <b className="text-gray-100">
-                        {selectedVehicle.schadstoffklasse}
-                      </b>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 text-sm">
-                        Emissionsnummer:
-                      </span>
-                      <br />
-                      <b className="text-gray-100">
-                        {selectedVehicle.emissionsnummer}
-                      </b>
+                      <b className="text-gray-100 font-mono text-[11px]">{selectedVehicle.vin}</b>
                     </div>
                   </div>
 
                   <div className="border-t border-gray-700 pt-4">
                     <div className="flex justify-between items-center mb-3">
-                      <h3 className="text-gray-400 text-sm font-semibold">
-                        Gescannte Seiten ({selectedVehicle.bilder?.length || 0}
-                        ):
+                      <h3 className="text-gray-400 text-xs font-semibold uppercase tracking-wider">
+                        Gescannte Seiten ({selectedVehicle.bilder?.length || 0}):
                       </h3>
                     </div>
 
                     <div className="flex flex-row gap-2 mb-4">
                       <button
                         onClick={startCamera}
-                        className="w-1/2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-2 rounded-xl font-bold text-xs shadow flex justify-center items-center gap-1 transition-all"
+                        className="w-1/2 bg-blue-600 hover:bg-blue-700 text-white py-2 px-2 rounded-xl font-bold text-xs shadow flex justify-center items-center gap-1 transition-all"
                       >
                         📷 Kamera Seite
                       </button>
 
-                      <label className="w-1/2 bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white py-2.5 px-2 rounded-xl font-bold text-xs shadow flex justify-center items-center gap-1 cursor-pointer transition-all border border-gray-600 text-center">
+                      <label className="w-1/2 bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white py-2 px-2 rounded-xl font-bold text-xs shadow flex justify-center items-center gap-1 cursor-pointer transition-all border border-gray-600 text-center">
                         📁 Datei wählen
                         <input
                           type="file"
@@ -1162,13 +1212,13 @@ export default function FahrzeugscheinScanner() {
               <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4">
                 <button
                   onClick={stopCamera}
-                  className="bg-red-600 hover:bg-red-700 transition-colors text-white px-5 py-2 rounded-full font-bold shadow-lg"
+                  className="bg-red-600 hover:bg-red-700 transition-colors text-white px-5 py-2 rounded-full font-bold shadow-lg text-xs"
                 >
                   Abbrechen
                 </button>
                 <button
                   onClick={captureImage}
-                  className="bg-white text-blue-600 px-6 py-2 rounded-full font-bold shadow-lg"
+                  className="bg-white text-blue-600 px-6 py-2 rounded-full font-bold shadow-lg text-xs"
                 >
                   {selectedVehicle ? 'Seite hinzufügen' : 'Foto auslösen'}
                 </button>
@@ -1205,10 +1255,10 @@ export default function FahrzeugscheinScanner() {
               <div className="mb-6 relative">
                 <input
                   type="text"
-                  placeholder="🔍 Suchen nach Kennzeichen, Name, Motorcode..."
+                  placeholder="🔍 Suche (Kennzeichen, Name, Teilenummer...)"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full p-4 pl-12 bg-gray-800 text-white border border-gray-700 rounded-xl shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500 transition-all"
+                  className="w-full p-3 pl-10 bg-gray-800 text-white border border-gray-700 rounded-xl shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500 text-xs transition-all"
                 />
               </div>
 
@@ -1217,55 +1267,45 @@ export default function FahrzeugscheinScanner() {
                   <div
                     key={scan.id}
                     onClick={() => setSelectedVehicle(scan)}
-                    className="bg-gray-800 p-4 rounded-xl shadow-md cursor-pointer border-l-4 border-blue-500 hover:bg-gray-700 hover:shadow-lg transition-all flex justify-between items-center"
+                    className="bg-gray-800 p-3.5 rounded-xl shadow-md cursor-pointer border-l-4 border-blue-500 hover:bg-gray-700 hover:shadow-lg transition-all flex justify-between items-center"
                   >
                     <div className="flex-grow pr-2">
                       <div className="flex justify-between items-center mb-1">
-                        <span className="font-bold text-lg text-white">
+                        <span className="font-bold text-base text-white">
                           {scan.kennzeichen}
                         </span>
-                        <span className="text-xs text-gray-400">
-                          {scan.datum}
+                        <span className="text-[11px] bg-emerald-950/60 text-emerald-400 px-2 py-0.5 rounded font-mono border border-emerald-800">
+                          {scan.km_stand} km
                         </span>
                       </div>
-                      <div className="text-sm text-gray-400 flex flex-wrap items-center gap-2">
+                      <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2">
                         <span className="text-gray-300">
                           {scan.hersteller} {scan.modell}
                         </span>
                         <span>|</span>
-                        <span className="text-blue-400 font-medium bg-gray-900/60 px-2 py-0.5 rounded text-xs border border-gray-700">
+                        <span className="text-blue-400 font-medium">
                           {scan.motorcode || 'Kein Motorcode'}
                         </span>
-                        {scan.bilder && scan.bilder.length > 0 && (
-                          <span className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">
-                            📄 {scan.bilder.length} Seiten
-                          </span>
-                        )}
                         {scan.historie && scan.historie.length > 0 && (
-                          <span className="text-xs bg-purple-900/60 text-purple-300 px-1.5 py-0.5 rounded border border-purple-700">
+                          <span className="text-[10px] bg-purple-950/60 text-purple-300 px-1.5 py-0.5 rounded border border-purple-800">
                             📋 {scan.historie.length}
-                          </span>
-                        )}
-                        {scan.dokumente && scan.dokumente.length > 0 && (
-                          <span className="text-xs bg-teal-900/60 text-teal-300 px-1.5 py-0.5 rounded border border-teal-700">
-                            📎 {scan.dokumente.length}
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         onClick={(e) => handleStartEdit(e, scan)}
                         title="Bearbeiten"
-                        className="p-2 bg-gray-700 hover:bg-blue-600 text-gray-300 hover:text-white rounded-lg transition-colors"
+                        className="p-1.5 bg-gray-700 hover:bg-blue-600 text-gray-300 hover:text-white rounded-lg transition-colors text-xs"
                       >
                         ✏️
                       </button>
                       <button
                         onClick={(e) => handleDelete(e, scan.id)}
                         title="Löschen"
-                        className="p-2 bg-gray-700 hover:bg-red-600 text-gray-300 hover:text-white rounded-lg transition-colors"
+                        className="p-1.5 bg-gray-700 hover:bg-red-600 text-gray-300 hover:text-white rounded-lg transition-colors text-xs"
                       >
                         🗑️
                       </button>
@@ -1273,7 +1313,7 @@ export default function FahrzeugscheinScanner() {
                   </div>
                 ))}
                 {filteredScans.length === 0 && (
-                  <p className="text-center text-gray-500 mt-8">
+                  <p className="text-center text-gray-500 text-xs mt-8">
                     Keine Fahrzeuge gefunden.
                   </p>
                 )}
@@ -1286,11 +1326,43 @@ export default function FahrzeugscheinScanner() {
           <p className="text-xs text-gray-500">© D.Irmer</p>
         </footer>
 
+        {/* Pflichtfeld KM-Stand Modal nach Scan oder Datei-Upload */}
+        {isKmModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-gray-800 border border-red-500/50 rounded-2xl p-5 max-w-xs w-full shadow-2xl space-y-4 text-center">
+              <div className="text-3xl mb-1">🚗</div>
+              <h2 className="text-lg font-bold text-white">Kilometerstand erforderlich</h2>
+              <p className="text-xs text-gray-300">
+                Bitte gib den aktuellen Kilometerstand für das Kennzeichen <b className="text-blue-400">{pendingScanData?.kennzeichen}</b> ein:
+              </p>
+
+              <form onSubmit={handleKmModalSubmit} className="space-y-3">
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={tempKmInput}
+                  onChange={(e) => setTempKmInput(e.target.value)}
+                  placeholder="z.B. 145200"
+                  className="w-full p-3 bg-gray-900 border border-red-500 rounded-xl text-white font-mono text-center text-lg font-bold focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-bold text-xs shadow transition-all"
+                >
+                  ✓ Speichern & Weiter
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Manuell Anlegen Modal */}
         {isManualOpen && (
           <div className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-gray-800 border border-gray-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center border-b border-gray-700 pb-3">
-                <h2 className="text-lg font-bold text-white">
+            <div className="bg-gray-800 border border-gray-700 rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-3 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center border-b border-gray-700 pb-2">
+                <h2 className="text-base font-bold text-white">
                   ➕ Fahrzeug manuell anlegen
                 </h2>
                 <button
@@ -1301,30 +1373,50 @@ export default function FahrzeugscheinScanner() {
                 </button>
               </div>
 
-              <form onSubmit={handleManualSubmit} className="space-y-3">
+              <form onSubmit={handleManualSubmit} className="space-y-2.5 text-xs">
                 <div>
-                  <label className="text-xs text-gray-400">
-                    Kennzeichen *:
-                  </label>
+                  <label className="text-gray-400">Kennzeichen *:</label>
                   <input
                     type="text"
                     required
                     value={manualForm.kennzeichen}
                     onChange={(e) =>
-                      setManualForm({
-                        ...manualForm,
-                        kennzeichen: e.target.value,
-                      })
+                      setManualForm({ ...manualForm, kennzeichen: e.target.value })
                     }
                     placeholder="z.B. ES-DI 2026"
-                    className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white font-bold"
+                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white font-bold"
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-red-400 font-bold">KM-Stand *:</label>
+                    <input
+                      type="text"
+                      required
+                      value={manualForm.km_stand}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, km_stand: e.target.value })
+                      }
+                      placeholder="z.B. 125000"
+                      className="w-full p-2 bg-gray-900 border border-red-500 rounded-lg text-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400">Nächste HU / TÜV:</label>
+                    <input
+                      type="date"
+                      value={manualForm.tuev_datum}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, tuev_datum: e.target.value })
+                      }
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-xs text-gray-400">
-                    Kunde / Halter:
-                  </label>
+                  <label className="text-gray-400">Kunde / Halter:</label>
                   <input
                     type="text"
                     value={manualForm.name}
@@ -1332,28 +1424,25 @@ export default function FahrzeugscheinScanner() {
                       setManualForm({ ...manualForm, name: e.target.value })
                     }
                     placeholder="z.B. Daniel Irmer"
-                    className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-gray-400">Hersteller:</label>
+                    <label className="text-gray-400">Hersteller:</label>
                     <input
                       type="text"
                       value={manualForm.hersteller}
                       onChange={(e) =>
-                        setManualForm({
-                          ...manualForm,
-                          hersteller: e.target.value,
-                        })
+                        setManualForm({ ...manualForm, hersteller: e.target.value })
                       }
                       placeholder="z.B. BMW"
-                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-400">Modell:</label>
+                    <label className="text-gray-400">Modell:</label>
                     <input
                       type="text"
                       value={manualForm.modell}
@@ -1361,32 +1450,27 @@ export default function FahrzeugscheinScanner() {
                         setManualForm({ ...manualForm, modell: e.target.value })
                       }
                       placeholder="z.B. 320i"
-                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-xs text-gray-400">Motorcode:</label>
+                  <label className="text-gray-400">Motorcode:</label>
                   <input
                     type="text"
                     value={manualForm.motorcode}
                     onChange={(e) =>
-                      setManualForm({
-                        ...manualForm,
-                        motorcode: e.target.value,
-                      })
+                      setManualForm({ ...manualForm, motorcode: e.target.value })
                     }
                     placeholder="z.B. N20B20"
-                    className="w-full p-2.5 bg-gray-900 border border-blue-500 rounded-xl text-white font-semibold"
+                    className="w-full p-2 bg-gray-900 border border-blue-500 rounded-lg text-white font-semibold"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-gray-400">
-                      Leistung (kW):
-                    </label>
+                    <label className="text-gray-400">Leistung (kW):</label>
                     <input
                       type="text"
                       value={manualForm.kw}
@@ -1394,89 +1478,74 @@ export default function FahrzeugscheinScanner() {
                         setManualForm({ ...manualForm, kw: e.target.value })
                       }
                       placeholder="z.B. 135 kW"
-                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-400">
-                      Hubraum (ccm):
-                    </label>
+                    <label className="text-gray-400">Hubraum (ccm):</label>
                     <input
                       type="text"
                       value={manualForm.hubraum}
                       onChange={(e) =>
-                        setManualForm({
-                          ...manualForm,
-                          hubraum: e.target.value,
-                        })
+                        setManualForm({ ...manualForm, hubraum: e.target.value })
                       }
                       placeholder="z.B. 1997"
-                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-gray-400">HSN/TSN:</label>
+                    <label className="text-gray-400">HSN/TSN:</label>
                     <input
                       type="text"
                       value={manualForm.hsn_tsn}
                       onChange={(e) =>
-                        setManualForm({
-                          ...manualForm,
-                          hsn_tsn: e.target.value,
-                        })
+                        setManualForm({ ...manualForm, hsn_tsn: e.target.value })
                       }
                       placeholder="z.B. 0005/ABC"
-                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-400">
-                      Baujahr / EZ:
-                    </label>
+                    <label className="text-gray-400">Baujahr / EZ:</label>
                     <input
                       type="text"
                       value={manualForm.baujahr}
                       onChange={(e) =>
-                        setManualForm({
-                          ...manualForm,
-                          baujahr: e.target.value,
-                        })
+                        setManualForm({ ...manualForm, baujahr: e.target.value })
                       }
                       placeholder="z.B. 05.2014"
-                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white"
+                      className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-xs text-gray-400">
-                    Fahrgestellnummer (VIN):
-                  </label>
+                  <label className="text-gray-400">Fahrgestellnummer (VIN):</label>
                   <input
                     type="text"
                     value={manualForm.vin}
                     onChange={(e) =>
                       setManualForm({ ...manualForm, vin: e.target.value })
                     }
-                    placeholder="z.B. WBA3A57... "
-                    className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-xs"
+                    placeholder="z.B. WBA3A57..."
+                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded-lg text-white font-mono"
                   />
                 </div>
 
-                <div className="flex gap-3 pt-2">
+                <div className="flex gap-2 pt-2">
                   <button
                     type="submit"
-                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl font-bold shadow transition-all text-xs"
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-bold shadow transition-all"
                   >
-                    💾 Fahrzeug anlegen
+                    💾 Anlegen
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsManualOpen(false)}
-                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-xl font-bold shadow transition-all text-xs"
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold shadow transition-all"
                   >
                     Abbrechen
                   </button>
@@ -1488,38 +1557,31 @@ export default function FahrzeugscheinScanner() {
 
         {duplicateModal.isOpen && (
           <div className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-gray-800 border border-yellow-600/50 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
-              <div className="text-4xl mb-1">⚠️</div>
-              <h2 className="text-xl font-bold text-white">
-                Fahrzeug bereits vorhanden!
-              </h2>
+            <div className="bg-gray-800 border border-yellow-600/50 rounded-2xl p-5 max-w-xs w-full shadow-2xl space-y-3 text-center">
+              <div className="text-3xl mb-1">⚠️</div>
+              <h2 className="text-base font-bold text-white">Fahrzeug vorhanden!</h2>
               <p className="text-xs text-gray-300">
-                Das Kennzeichen{' '}
-                <b className="text-blue-400">
-                  {duplicateModal.newScanData?.kennzeichen}
-                </b>{' '}
-                ist bereits im System gespeichert (Halter:{' '}
-                {duplicateModal.existingVehicle?.name}). Was möchtest du tun?
+                Das Kennzeichen <b className="text-blue-400">{duplicateModal.newScanData?.kennzeichen}</b> ist bereits gespeichert.
               </p>
 
-              <div className="space-y-2.5 pt-2">
+              <div className="space-y-2 pt-1 text-xs">
                 <button
                   onClick={() => handleDuplicateAction('merge')}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-xl font-bold text-xs transition-all shadow"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded-xl font-bold shadow"
                 >
-                  📁 Zu bestehender Akte hinzufügen (Seiten anhängen)
+                  📁 Seiten anhängen
                 </button>
                 <button
                   onClick={() => handleDuplicateAction('overwrite')}
-                  className="w-full bg-amber-600 hover:bg-amber-700 text-white py-2.5 px-4 rounded-xl font-bold text-xs transition-all shadow"
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white py-2 px-3 rounded-xl font-bold shadow"
                 >
-                  🔄 Stammdaten überschreiben (Historie behalten)
+                  🔄 Stammdaten überschreiben
                 </button>
                 <button
                   onClick={() => handleDuplicateAction('new')}
-                  className="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 py-2.5 px-4 rounded-xl font-bold text-xs transition-all shadow"
+                  className="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 py-2 px-3 rounded-xl font-bold shadow"
                 >
-                  ➕ Als neues, separates Fahrzeug anlegen
+                  ➕ Als neues Fahrzeug anlegen
                 </button>
               </div>
             </div>
@@ -1532,13 +1594,11 @@ export default function FahrzeugscheinScanner() {
             onClick={() => setIsSettingsOpen(false)}
           >
             <div
-              className="bg-gray-800 border border-gray-700 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4"
+              className="bg-gray-800 border border-gray-700 rounded-2xl p-5 max-w-xs w-full shadow-2xl space-y-3"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-white">
-                  ⚙️ Einstellungen
-                </h2>
+                <h2 className="text-base font-bold text-white">⚙️ Einstellungen</h2>
                 <button
                   onClick={() => setIsSettingsOpen(false)}
                   className="text-gray-400 hover:text-white font-bold px-2 py-1"
@@ -1547,31 +1607,29 @@ export default function FahrzeugscheinScanner() {
                 </button>
               </div>
 
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-300 font-semibold mb-1 block">
-                    Gemini API Key:
-                  </label>
-                  <input
-                    type="password"
-                    value={tempApiKey}
-                    onChange={(e) => setTempApiKey(e.target.value)}
-                    className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Gib hier deinen API-Key ein..."
-                  />
-                </div>
+              <div>
+                <label className="text-xs text-gray-300 font-semibold mb-1 block">
+                  Gemini API Key:
+                </label>
+                <input
+                  type="password"
+                  value={tempApiKey}
+                  onChange={(e) => setTempApiKey(e.target.value)}
+                  className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="API Key..."
+                />
               </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2 pt-2">
                 <button
                   onClick={handleSaveSettings}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-bold shadow transition-all"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl font-bold text-xs shadow"
                 >
                   Speichern
                 </button>
                 <button
                   onClick={() => setIsSettingsOpen(false)}
-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-xl font-bold shadow transition-all"
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-xl font-bold text-xs shadow"
                 >
                   Abbrechen
                 </button>
@@ -1586,22 +1644,17 @@ export default function FahrzeugscheinScanner() {
             onClick={() => setIsHistoryOpen(false)}
           >
             <div
-              className="bg-gray-800 border border-gray-700 rounded-2xl p-5 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
+              className="bg-gray-800 border border-gray-700 rounded-2xl p-4 max-w-md w-full shadow-2xl space-y-3 max-h-[90vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-between items-center border-b border-gray-700 pb-3 shrink-0">
+              <div className="flex justify-between items-center border-b border-gray-700 pb-2 shrink-0">
                 <div>
-                  <h2 className="text-xl font-bold text-white">
-                    📋 Werkstatt-Historie
-                  </h2>
-                  <p className="text-xs text-gray-400">
-                    Fahrzeug: {selectedVehicle.kennzeichen} (
-                    {selectedVehicle.hersteller} {selectedVehicle.modell})
-                  </p>
+                  <h2 className="text-base font-bold text-white">📋 Werkstatt-Historie</h2>
+                  <p className="text-[11px] text-gray-400">{selectedVehicle.kennzeichen}</p>
                 </div>
                 <button
                   onClick={() => setIsHistoryOpen(false)}
-                  className="text-gray-400 hover:text-white font-bold px-2 py-1 text-lg"
+                  className="text-gray-400 hover:text-white font-bold px-2 py-1 text-base"
                 >
                   ✕
                 </button>
@@ -1609,26 +1662,21 @@ export default function FahrzeugscheinScanner() {
 
               <form
                 onSubmit={handleAddHistoryEntry}
-                className="bg-gray-900 p-3 rounded-xl border border-gray-700 space-y-3 shrink-0"
+                className="bg-gray-900 p-2.5 rounded-xl border border-gray-700 space-y-2.5 shrink-0 text-xs"
               >
-                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">
+                <h3 className="font-bold text-blue-400 uppercase tracking-wider text-[11px]">
                   Neuen Eintrag erfassen
                 </h3>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-[10px] text-gray-400">
-                      Kategorie:
-                    </label>
+                    <label className="text-[10px] text-gray-400">Kategorie:</label>
                     <select
                       value={historyForm.kategorie}
                       onChange={(e) =>
-                        setHistoryForm({
-                          ...historyForm,
-                          kategorie: e.target.value,
-                        })
+                        setHistoryForm({ ...historyForm, kategorie: e.target.value })
                       }
-                      className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white"
+                      className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white"
                     >
                       <option value="Reparatur">Reparatur</option>
                       <option value="Kundendienst">Kundendienst</option>
@@ -1638,119 +1686,116 @@ export default function FahrzeugscheinScanner() {
                     </select>
                   </div>
                   <div>
+                    <label className="text-[10px] text-red-400 font-bold">KM-Stand *:</label>
+                    <input
+                      type="text"
+                      required
+                      value={historyForm.km_stand}
+                      onChange={(e) =>
+                        setHistoryForm({ ...historyForm, km_stand: e.target.value })
+                      }
+                      placeholder="z.B. 146000"
+                      className="w-full p-1.5 bg-gray-800 border border-red-500 rounded text-xs text-white font-bold"
+                    />
+                  </div>
+                  <div>
                     <label className="text-[10px] text-gray-400">Datum:</label>
                     <input
                       type="date"
                       value={historyForm.datum}
                       onChange={(e) =>
-                        setHistoryForm({
-                          ...historyForm,
-                          datum: e.target.value,
-                        })
+                        setHistoryForm({ ...historyForm, datum: e.target.value })
                       }
-                      className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white"
+                      className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-gray-400">
-                    Beschreibung der Arbeiten / Diagnose:
-                  </label>
+                  <label className="text-[10px] text-gray-400">Beschreibung / Diagnose:</label>
                   <textarea
                     rows="2"
                     value={historyForm.beschreibung}
                     onChange={(e) =>
-                      setHistoryForm({
-                        ...historyForm,
-                        beschreibung: e.target.value,
-                      })
+                      setHistoryForm({ ...historyForm, beschreibung: e.target.value })
                     }
-                    placeholder="z.B. Steuerkette erneuert, Fehlerspeicher ausgelesen..."
-                    className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white placeholder-gray-500"
+                    placeholder="z.B. Bremsscheiben und Beläge erneuert..."
+                    className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white placeholder-gray-500"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-gray-400">
-                    Teilenummern (optional):
-                  </label>
+                  <label className="text-[10px] text-gray-400">Teilenummern (optional):</label>
                   <input
                     type="text"
                     value={historyForm.teilenummern}
                     onChange={(e) =>
-                      setHistoryForm({
-                        ...historyForm,
-                        teilenummern: e.target.value,
-                      })
+                      setHistoryForm({ ...historyForm, teilenummern: e.target.value })
                     }
-                    placeholder="z.B. 11317584723, 11-31-7-567-680"
-                    className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white placeholder-gray-500 font-mono"
+                    placeholder="z.B. 34116855007, ATE-24.0122..."
+                    className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white font-mono"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-bold text-xs transition-all shadow"
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-bold text-xs shadow"
                 >
-                  + Eintrag zur Historie hinzufügen
+                  + Zur Historie hinzufügen
                 </button>
               </form>
 
-              <div className="overflow-y-auto flex-grow space-y-2 pr-1">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+              <div className="overflow-y-auto flex-grow space-y-2 pr-1 text-xs">
+                <h3 className="font-bold text-gray-400 uppercase tracking-wider text-[11px] mb-1">
                   Bisherige Einträge ({selectedVehicle.historie?.length || 0}):
                 </h3>
 
-                {selectedVehicle.historie &&
-                selectedVehicle.historie.length > 0 ? (
+                {selectedVehicle.historie && selectedVehicle.historie.length > 0 ? (
                   selectedVehicle.historie.map((entry) => (
                     <div
                       key={entry.id}
-                      className="bg-gray-900 p-3 rounded-xl border border-gray-700 relative group"
+                      className="bg-gray-900 p-2.5 rounded-xl border border-gray-700 relative"
                     >
                       <div className="flex justify-between items-start mb-1">
                         <div className="flex items-center gap-2">
                           <span
                             className={`text-[10px] px-2 py-0.5 rounded font-bold ${
                               entry.kategorie === 'Reparatur'
-                                ? 'bg-red-900/60 text-red-300 border border-red-700'
+                                ? 'bg-red-950 text-red-300 border border-red-800'
                                 : entry.kategorie === 'Kundendienst'
-                                ? 'bg-green-900/60 text-green-300 border border-green-700'
-                                : entry.kategorie === 'Fehlersuche'
-                                ? 'bg-yellow-900/60 text-yellow-300 border border-yellow-700'
-                                : 'bg-blue-900/60 text-blue-300 border border-blue-700'
+                                ? 'bg-green-950 text-green-300 border border-green-800'
+                                : 'bg-blue-950 text-blue-300 border border-blue-800'
                             }`}
                           >
                             {entry.kategorie}
                           </span>
-                          <span className="text-xs text-gray-400 font-mono">
+                          <span className="text-[11px] text-emerald-400 font-mono font-bold">
+                            {entry.km_stand} km
+                          </span>
+                          <span className="text-[11px] text-gray-400 font-mono">
                             {entry.datum}
                           </span>
                         </div>
                         <button
                           onClick={() => handleDeleteHistoryEntry(entry.id)}
-                          className="text-gray-500 hover:text-red-400 text-xs p-1 transition-colors"
-                          title="Eintrag löschen"
+                          className="text-gray-500 hover:text-red-400 text-xs p-1"
                         >
                           🗑️
                         </button>
                       </div>
 
-                      <p className="text-sm text-gray-200 mt-1 whitespace-pre-wrap">
-                        {entry.beschreibung}
-                      </p>
+                      <p className="text-gray-200 mt-1 whitespace-pre-wrap">{entry.beschreibung}</p>
 
                       {entry.teilenummern && (
-                        <div className="mt-2 pt-2 border-t border-gray-800 text-xs text-blue-400 font-mono flex items-center gap-1">
+                        <div className="mt-1.5 pt-1.5 border-t border-gray-800 text-[11px] text-blue-400 font-mono">
                           <span>📦 Teile:</span> {entry.teilenummern}
                         </div>
                       )}
                     </div>
                   ))
                 ) : (
-                  <p className="text-center text-gray-500 text-xs py-8">
-                    Noch keine Historien-Einträge für dieses Fahrzeug vorhanden.
+                  <p className="text-center text-gray-500 text-xs py-6">
+                    Noch keine Historien-Einträge vorhanden.
                   </p>
                 )}
               </div>
@@ -1764,21 +1809,17 @@ export default function FahrzeugscheinScanner() {
             onClick={() => setIsDocsOpen(false)}
           >
             <div
-              className="bg-gray-800 border border-gray-700 rounded-2xl p-5 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
+              className="bg-gray-800 border border-gray-700 rounded-2xl p-4 max-w-md w-full shadow-2xl space-y-3 max-h-[90vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-between items-center border-b border-gray-700 pb-3 shrink-0">
+              <div className="flex justify-between items-center border-b border-gray-700 pb-2 shrink-0">
                 <div>
-                  <h2 className="text-xl font-bold text-white">
-                    📎 Dokumente & Dateien
-                  </h2>
-                  <p className="text-xs text-gray-400">
-                    Fahrzeug: {selectedVehicle.kennzeichen}
-                  </p>
+                  <h2 className="text-base font-bold text-white">📎 Dokumente & Dateien</h2>
+                  <p className="text-[11px] text-gray-400">{selectedVehicle.kennzeichen}</p>
                 </div>
                 <button
                   onClick={() => setIsDocsOpen(false)}
-                  className="text-gray-400 hover:text-white font-bold px-2 py-1 text-lg"
+                  className="text-gray-400 hover:text-white font-bold px-2 py-1 text-base"
                 >
                   ✕
                 </button>
@@ -1786,30 +1827,24 @@ export default function FahrzeugscheinScanner() {
 
               <form
                 onSubmit={handleAddDocument}
-                className="bg-gray-900 p-3 rounded-xl border border-gray-700 space-y-3 shrink-0"
+                className="bg-gray-900 p-2.5 rounded-xl border border-gray-700 space-y-2.5 shrink-0 text-xs"
               >
-                <h3 className="text-xs font-bold text-teal-400 uppercase tracking-wider">
-                  Dokument / Datei hinzufügen
+                <h3 className="font-bold text-teal-400 uppercase tracking-wider text-[11px]">
+                  Dokument hinzufügen
                 </h3>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-gray-400">
-                      Bereich / Kategorie:
-                    </label>
+                    <label className="text-[10px] text-gray-400">Kategorie:</label>
                     <select
                       value={docForm.kategorie}
-                      onChange={(e) =>
-                        setDocForm({ ...docForm, kategorie: e.target.value })
-                      }
-                      className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white"
+                      onChange={(e) => setDocForm({ ...docForm, kategorie: e.target.value })}
+                      className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white"
                     >
-                      <option value="Rechnungen">Rechnungen & Belege</option>
+                      <option value="Rechnungen">Rechnungen</option>
                       <option value="ABEs">ABEs & Gutachten</option>
-                      <option value="Fehlerspeicher">
-                        Fehlerspeicherprotokoll
-                      </option>
-                      <option value="Sonstige">Sonstige Informationen</option>
+                      <option value="Fehlerspeicher">Fehlerspeicher</option>
+                      <option value="Sonstige">Sonstige</option>
                     </select>
                   </div>
                   <div>
@@ -1817,118 +1852,72 @@ export default function FahrzeugscheinScanner() {
                     <input
                       type="date"
                       value={docForm.datum}
-                      onChange={(e) =>
-                        setDocForm({ ...docForm, datum: e.target.value })
-                      }
-                      className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white"
+                      onChange={(e) => setDocForm({ ...docForm, datum: e.target.value })}
+                      className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-gray-400">
-                    Titel / Bezeichnung:
-                  </label>
+                  <label className="text-[10px] text-gray-400">Titel / Bezeichnung:</label>
                   <input
                     type="text"
                     value={docForm.titel}
-                    onChange={(e) =>
-                      setDocForm({ ...docForm, titel: e.target.value })
-                    }
-                    placeholder="z.B. Rechnung Inspektion 2026, ABE Felgen..."
-                    className="w-full p-2 bg-gray-800 border border-gray-700 rounded text-xs text-white placeholder-gray-500"
+                    onChange={(e) => setDocForm({ ...docForm, titel: e.target.value })}
+                    placeholder="z.B. Rechnung Inspektion..."
+                    className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-gray-400">
-                    Datei hochladen (Foto / PDF / Scan):
-                  </label>
                   <input
                     type="file"
                     accept="image/*,application/pdf"
                     onChange={handleDocFileSelect}
-                    className="w-full p-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-teal-600 file:text-white hover:file:bg-teal-700 cursor-pointer"
+                    className="w-full text-xs text-gray-300 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-bold file:bg-teal-600 file:text-white cursor-pointer"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-teal-600 hover:bg-teal-700 text-white py-2 rounded-lg font-bold text-xs transition-all shadow"
+                  className="w-full bg-teal-600 hover:bg-teal-700 text-white py-2 rounded-lg font-bold text-xs shadow"
                 >
                   + Dokument speichern
                 </button>
               </form>
 
-              <div className="overflow-y-auto flex-grow space-y-3 pr-1">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                  Hinterlegte Dokumente (
-                  {selectedVehicle.dokumente?.length || 0}):
-                </h3>
-
-                {selectedVehicle.dokumente &&
-                selectedVehicle.dokumente.length > 0 ? (
-                  ['Rechnungen', 'ABEs', 'Fehlerspeicher', 'Sonstige'].map(
-                    (kat) => {
-                      const docsInCat = selectedVehicle.dokumente.filter(
-                        (d) => d.kategorie === kat
-                      );
-                      if (docsInCat.length === 0) return null;
-
-                      return (
-                        <div key={kat} className="space-y-1.5">
-                          <h4 className="text-[11px] font-bold text-teal-300 bg-teal-950/40 px-2 py-1 rounded border border-teal-900/50">
-                            {kat === 'Rechnungen'
-                              ? '📄 Rechnungen & Belege'
-                              : kat === 'ABEs'
-                              ? '📜 ABEs & Gutachten'
-                              : kat === 'Fehlerspeicher'
-                              ? '🔍 Fehlerspeicherprotokolle'
-                              : '📁 Sonstige Informationen'}{' '}
-                            ({docsInCat.length})
-                          </h4>
-
-                          {docsInCat.map((doc) => (
-                            <div
-                              key={doc.id}
-                              className="bg-gray-900 p-2.5 rounded-xl border border-gray-700 flex justify-between items-center"
-                            >
-                              <div className="pr-2">
-                                <span className="text-xs font-bold text-white block">
-                                  {doc.titel}
-                                </span>
-                                <span className="text-[10px] text-gray-400 font-mono">
-                                  {doc.datum}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center gap-2 shrink-0">
-                                {doc.dateiData && (
-                                  <button
-                                    onClick={() => openDocumentInNewTab(doc)}
-                                    className="text-xs bg-gray-800 hover:bg-gray-700 text-teal-400 px-2.5 py-1 rounded border border-gray-600 font-medium"
-                                  >
-                                    👁️ Öffnen
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => handleDeleteDocument(doc.id)}
-                                  className="text-gray-500 hover:text-red-400 text-xs p-1"
-                                  title="Dokument löschen"
-                                >
-                                  🗑️
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    }
-                  )
+              <div className="overflow-y-auto flex-grow space-y-2 pr-1 text-xs">
+                {selectedVehicle.dokumente && selectedVehicle.dokumente.length > 0 ? (
+                  selectedVehicle.dokumente.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="bg-gray-900 p-2.5 rounded-xl border border-gray-700 flex justify-between items-center"
+                    >
+                      <div>
+                        <span className="font-bold text-white block">{doc.titel}</span>
+                        <span className="text-[10px] text-gray-400 font-mono">{doc.datum} ({doc.kategorie})</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {doc.dateiData && (
+                          <button
+                            onClick={() => openDocumentInNewTab(doc)}
+                            className="text-xs bg-gray-800 text-teal-400 px-2 py-1 rounded border border-gray-600"
+                          >
+                            👁️ Öffnen
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteDocument(doc.id)}
+                          className="text-gray-500 hover:text-red-400 text-xs"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))
                 ) : (
-                  <p className="text-center text-gray-500 text-xs py-8">
-                    Noch keine Dokumente oder Dateien für dieses Fahrzeug
-                    hinterlegt.
+                  <p className="text-center text-gray-500 text-xs py-6">
+                    Keine Dokumente hinterlegt.
                   </p>
                 )}
               </div>
@@ -1947,7 +1936,7 @@ export default function FahrzeugscheinScanner() {
               <div className="relative max-w-4xl w-full flex flex-col items-center">
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="absolute -top-12 right-0 bg-gray-800 hover:bg-gray-700 text-white font-bold px-4 py-2 rounded-lg border border-gray-600 shadow-lg transition-all z-10"
+                  className="absolute -top-12 right-0 bg-gray-800 hover:bg-gray-700 text-white font-bold px-4 py-2 rounded-lg border border-gray-600 shadow-lg transition-all z-10 text-xs"
                 >
                   ✕ Schließen
                 </button>
@@ -1958,43 +1947,6 @@ export default function FahrzeugscheinScanner() {
                   className="max-h-[85vh] w-auto rounded-xl border-2 border-gray-700 shadow-2xl object-contain"
                   onClick={(e) => e.stopPropagation()}
                 />
-
-                <div className="flex items-center gap-4 mt-4">
-                  <span className="text-gray-300 text-sm font-medium">
-                    Seite {activeImageIndex + 1} von{' '}
-                    {selectedVehicle.bilder.length}
-                  </span>
-                  {selectedVehicle.bilder.length > 1 && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveImageIndex((prev) =>
-                            prev > 0
-                              ? prev - 1
-                              : selectedVehicle.bilder.length - 1
-                          );
-                        }}
-                        className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg border border-gray-600 text-xs font-bold"
-                      >
-                        ← Vorherige Seite
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveImageIndex((prev) =>
-                            prev < selectedVehicle.bilder.length - 1
-                              ? prev + 1
-                              : 0
-                          );
-                        }}
-                        className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg border border-gray-600 text-xs font-bold"
-                      >
-                        Nächste Seite →
-                      </button>
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           )}
