@@ -738,7 +738,6 @@ export default function FahrzeugscheinScanner() {
     }
   };
 
-  // PDF-Bericht / Druckfunktion
   const printVehicleReport = () => {
     if (!selectedVehicle) return;
     const printWindow = window.open('', '_blank');
@@ -799,28 +798,42 @@ export default function FahrzeugscheinScanner() {
     printWindow.document.close();
   };
 
-  // TÜV-Countdown Berechnung (Monatsbasis)
+  // TÜV-Countdown Berechnung Detail-Banner (Monatsbasis)
   const getTuevStatus = (tuevStr) => {
     if (!tuevStr) return { text: 'HU/TÜV nicht hinterlegt', color: 'bg-gray-800 text-gray-400 border-gray-700' };
     
     const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth() + 1;
-
     const parts = tuevStr.split('-');
-    if (parts.length < 2) return { text: `HU gültig bis ${tuevStr}`, color: 'bg-green-950/60 text-green-300 border-green-800' };
+    if (parts.length < 2) return { text: `HU gültig bis ${tuevStr}`, color: 'bg-emerald-950/60 text-emerald-400 border-emerald-800' };
 
-    const tuevYear = parseInt(parts[0], 10);
-    const tuevMonth = parseInt(parts[1], 10);
-
-    const diffMonths = (tuevYear - currentYear) * 12 + (tuevMonth - currentMonth);
+    const diffMonths = (parseInt(parts[0], 10) - today.getFullYear()) * 12 + (parseInt(parts[1], 10) - (today.getMonth() + 1));
 
     if (diffMonths < 0) {
-      return { text: `HU überfällig seit ${Math.abs(diffMonths)} Monat(en)!`, color: 'bg-red-950/80 text-red-300 border-red-700 animate-pulse' };
-    } else if (diffMonths === 0 || diffMonths === 1) {
-      return { text: `HU fällig in diesem/nächsten Monat!`, color: 'bg-amber-950/80 text-amber-300 border-amber-700' };
+      return { text: `HU überfällig seit ${Math.abs(diffMonths)} Monat(en)!`, color: 'bg-red-950/80 text-red-400 border-red-700 animate-pulse' };
+    } else if (diffMonths < 2) {
+      return { text: `HU fällig in ${diffMonths === 0 ? 'diesem Monat' : '1 Monat'}!`, color: 'bg-red-950/60 text-red-400 border-red-800' };
+    } else if (diffMonths < 6) {
+      return { text: `HU fällig in ${diffMonths} Monaten!`, color: 'bg-amber-950/80 text-amber-400 border-amber-700' };
     } else {
-      return { text: `HU gültig bis ${formatMonthYear(tuevStr)}`, color: 'bg-green-950/60 text-green-300 border-green-800' };
+      return { text: `HU gültig bis ${formatMonthYear(tuevStr)}`, color: 'bg-emerald-950/60 text-emerald-400 border-emerald-800' };
+    }
+  };
+
+  // Berechnung für die kleine Plakette in der Fahrzeugliste
+  const getTuevBadgeClasses = (tuevStr) => {
+    if (!tuevStr) return '';
+    const parts = tuevStr.split('-');
+    if (parts.length < 2) return 'bg-emerald-950/60 text-emerald-400 border-emerald-800';
+
+    const today = new Date();
+    const diffMonths = (parseInt(parts[0], 10) - today.getFullYear()) * 12 + (parseInt(parts[1], 10) - (today.getMonth() + 1));
+
+    if (diffMonths < 2) {
+      return 'bg-red-950/60 text-red-400 border-red-800';
+    } else if (diffMonths < 6) {
+      return 'bg-amber-950/60 text-amber-400 border-amber-800';
+    } else {
+      return 'bg-emerald-950/60 text-emerald-400 border-emerald-800';
     }
   };
 
@@ -1449,7 +1462,7 @@ export default function FahrzeugscheinScanner() {
                             {scan.km_stand} km
                           </span>
                           {scan.tuev_datum && (
-                            <span className="text-[11px] bg-amber-950/60 text-amber-400 px-2 py-0.5 rounded font-mono border border-amber-800">
+                            <span className={`text-[11px] px-2 py-0.5 rounded font-mono border ${getTuevBadgeClasses(scan.tuev_datum)}`}>
                               HU: {formatMonthYear(scan.tuev_datum)}
                             </span>
                           )}
