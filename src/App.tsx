@@ -1,20 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase Konfiguration mit direktem Fallback
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://vftpkzventrmmtlajl.supabase.co';
-const SUPABASE_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  'sb_publishable_JoQD_pjVmON8QDWm1tX5iA_47vtX0Qg';
+// Supabase Konfiguration mit sicherem Fallback
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://vftpkzventrmmtlajl.supabase.co';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_JoQD_pjVmON8QDWm1tX5iA_47vtX0Qg';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export default function FahrzeugscheinScanner() {
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [appPin, setAppPin] = useState(() => {
-    return localStorage.getItem('app_pin') || 'gGdHaC';
-  });
-  const [pinInput, setPinInput] = useState('');
+  const [session, setSession] = useState(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   const [apiKey, setApiKey] = useState(() => {
     return (
@@ -53,7 +49,6 @@ export default function FahrzeugscheinScanner() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempApiKey, setTempApiKey] = useState(apiKey);
-  const [tempPin, setTempPin] = useState(appPin);
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyForm, setHistoryForm] = useState({
@@ -82,10 +77,49 @@ export default function FahrzeugscheinScanner() {
   const canvasRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  // Daten beim Start aus Supabase laden
+  // Authentifizierungs-Status beim Start prüfen
   useEffect(() => {
-    fetchVehiclesFromCloud();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) {
+        fetchVehiclesFromCloud();
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        fetchVehiclesFromCloud();
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: authPassword,
+      });
+      if (error) throw error;
+    } catch (err) {
+      alert('Login fehlgeschlagen: ' + err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setScans([]);
+    setSelectedVehicle(null);
+  };
 
   const fetchVehiclesFromCloud = async () => {
     try {
@@ -102,11 +136,11 @@ export default function FahrzeugscheinScanner() {
         setScans(loadedScans);
       }
     } catch (err) {
-      console.warn('Cloud-Laden übersprungen / lokal aktiv:', err.message);
+      console.warn('Cloud-Laden fehlgeschlagen:', err.message);
     }
   };
 
-  // Fahrzeug in Supabase speichern (mit Fallback auf lokalen State bei CORS/Netzwerkfehlern)
+  // Fahrzeug in Supabase speichern
   const saveVehicleToCloud = async (vehicleData) => {
     try {
       if (vehicleData.supabaseId) {
@@ -127,10 +161,7 @@ export default function FahrzeugscheinScanner() {
         }
       }
     } catch (err) {
-      console.warn(
-        'Cloud-Speichern fehlgeschlagen (Sandbox/CORS), lokal aktiv:',
-        err.message
-      );
+      console.warn('Cloud-Speichern fehlgeschlagen:', err.message);
     }
   };
 
@@ -149,14 +180,8 @@ export default function FahrzeugscheinScanner() {
       alert('Bitte gib einen gültigen API-Schlüssel ein.');
       return;
     }
-    if (!tempPin.trim()) {
-      alert('Bitte gib eine gültige PIN ein.');
-      return;
-    }
     setApiKey(tempApiKey.trim());
-    setAppPin(tempPin.trim());
     localStorage.setItem('gemini_custom_api_key', tempApiKey.trim());
-    localStorage.setItem('app_pin', tempPin.trim());
     setIsSettingsOpen(false);
     alert('Einstellungen erfolgreich gespeichert!');
   };
@@ -186,6 +211,7 @@ export default function FahrzeugscheinScanner() {
   const captureImage = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    if (!video || !canvas) return;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -234,6 +260,7 @@ export default function FahrzeugscheinScanner() {
       abortControllerRef.current.abort();
     }
     setIsLoading(false);
+    setIsScanning(false);
   };
 
   const processNewVehicleData = async (newScanData) => {
@@ -386,6 +413,8 @@ export default function FahrzeugscheinScanner() {
       }
     } finally {
       setIsLoading(false);
+      setIsScanning(false);
+      setSelectedVehicle(null);
     }
   };
 
@@ -621,44 +650,48 @@ export default function FahrzeugscheinScanner() {
     }
   };
 
-  if (!isUnlocked) {
+  // Wenn nicht eingeloggt, Login-Bildschirm anzeigen
+  if (!session) {
     return (
       <div className="fixed inset-0 overflow-hidden bg-gray-900 text-gray-100 font-sans w-full h-full flex justify-center items-center p-4">
-        <div className="max-w-xs w-full bg-gray-800 border border-gray-700 rounded-2xl p-6 shadow-2xl space-y-4 text-center">
-          <div className="text-3xl mb-1">🔒</div>
-          <h2 className="text-xl font-bold text-white">App gesperrt</h2>
-          <p className="text-xs text-gray-400">
-            Bitte gib deine PIN ein, um den KFZ-Schein Scanner zu entsperren
-            (Standard: 1234).
-          </p>
+        <div className="max-w-sm w-full bg-gray-800 border border-gray-700 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div className="text-center">
+            <div className="text-3xl mb-1">🔐</div>
+            <h2 className="text-xl font-bold text-white">Cloud Login</h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Bitte melde dich mit deinen Zugangsdaten an, um fortzufahren.
+            </p>
+          </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (pinInput === appPin) {
-                setIsUnlocked(true);
-                setPinInput('');
-              } else {
-                alert('Falsche PIN!');
-                setPinInput('');
-              }
-            }}
-            className="space-y-3"
-          >
-            <input
-              type="password"
-              maxLength="6"
-              value={pinInput}
-              onChange={(e) => setPinInput(e.target.value)}
-              placeholder="PIN eingeben"
-              className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-center font-mono text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
-              autoFocus
-            />
+          <form onSubmit={handleLogin} className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">E-Mail-Adresse:</label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="name@beispiel.de"
+                className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Passwort:</label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-bold text-xs shadow transition-all"
+              disabled={authLoading}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-xs shadow transition-all mt-2"
             >
-              Entsperren
+              {authLoading ? 'Anmeldung läuft...' : 'Anmelden'}
             </button>
           </form>
         </div>
@@ -682,20 +715,29 @@ export default function FahrzeugscheinScanner() {
         <header className="bg-gray-800 text-white p-4 shadow-md flex justify-between items-center border-b border-gray-700 sticky top-0 z-10 shrink-0">
           <div>
             <h1 className="text-xl font-bold tracking-wide text-white">
-              KFZ-Schein Scanner (Cloud)
+              KFZ-Schein Scanner
             </h1>
+            <span className="text-[10px] text-gray-400 block">Eingeloggt als: {session.user.email}</span>
           </div>
-          <button
-            onClick={() => {
-              setTempApiKey(apiKey);
-              setTempPin(appPin);
-              setIsSettingsOpen(true);
-            }}
-            className="p-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl transition-all shadow border border-gray-600 flex items-center justify-center"
-            title="Einstellungen & Sicherheit"
-          >
-            ⚙️
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setTempApiKey(apiKey);
+                setIsSettingsOpen(true);
+              }}
+              className="p-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl transition-all shadow border border-gray-600 flex items-center justify-center text-xs"
+              title="Einstellungen"
+            >
+              ⚙️
+            </button>
+            <button
+              onClick={handleLogout}
+              className="p-2 bg-red-900/60 hover:bg-red-700 text-red-200 rounded-xl transition-all shadow border border-red-700 flex items-center justify-center text-xs"
+              title="Abmelden"
+            >
+              🚪
+            </button>
+          </div>
         </header>
 
         <main className="p-4 overflow-y-auto flex-grow pb-16">
@@ -1495,7 +1537,7 @@ export default function FahrzeugscheinScanner() {
             >
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-bold text-white">
-                  ⚙️ Einstellungen & Sicherheit
+                  ⚙️ Einstellungen
                 </h2>
                 <button
                   onClick={() => setIsSettingsOpen(false)}
@@ -1506,20 +1548,6 @@ export default function FahrzeugscheinScanner() {
               </div>
 
               <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-300 font-semibold mb-1 block">
-                    App-PIN ändern:
-                  </label>
-                  <input
-                    type="text"
-                    maxLength="6"
-                    value={tempPin}
-                    onChange={(e) => setTempPin(e.target.value)}
-                    className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Neue PIN eingeben..."
-                  />
-                </div>
-
                 <div>
                   <label className="text-xs text-gray-300 font-semibold mb-1 block">
                     Gemini API Key:
